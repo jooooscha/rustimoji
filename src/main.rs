@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, ffi::OsString, fs::File, io::{self, BufRead}, path::{Path, PathBuf}, process::exit};
+use std::{collections::HashMap, env, ffi::OsString, fs::File, io::{self, BufRead}, path::{Path, PathBuf}, process::{exit, Command}};
 use rofi;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -97,7 +97,26 @@ fn main() {
 
     // println!("Starting window");
     match rofi_window.run() {
-        Ok(choice) => println!("Choice: {}", choice),
+        Ok(choice) => {
+
+            let (choice, _) = choice.split_once(" ").expect("Could not extract emoji from selected line");
+
+            println!("Choice: {}", choice);
+
+            let mut child = Command::new("xclip")
+                .arg("-selection")
+                .arg("clipboard")
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+                .expect("Failed to spawn xclip process");
+
+            if let Some(stdin) = &mut child.stdin {
+                use std::io::Write;
+                stdin.write_all(choice.as_bytes()).expect("Failed to write to xclip");
+            }
+
+            child.wait().expect("Failed to wait for xclip process");
+        }
         Err(rofi::Error::Interrupted) => println!("Interrupted"),
         Err(e) => println!("Error: {}", e)
     }
