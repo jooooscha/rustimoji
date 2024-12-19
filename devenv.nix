@@ -4,7 +4,7 @@
   # https://devenv.sh/packages/
   packages = with pkgs; [
     git
-    xorg.libxcb
+    xclip
   ];
 
   languages.rust.enable = true;
