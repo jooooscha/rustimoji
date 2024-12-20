@@ -93,6 +93,7 @@ fn main() {
     };
 
     let mut rofi_window = rofi::Rofi::new(&emojies);
+    rofi_window.pango();
     rofi_window.lines(ROFI_LINES);
 
     // println!("Starting window");
