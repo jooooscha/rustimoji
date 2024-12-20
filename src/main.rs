@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, ffi::OsString, fs::File, io::{self, BufRead}, path::{Path, PathBuf}, process::{exit, Command}};
+use std::{env, ffi::OsString, fs::File, io::{self, BufRead}, path::{Path, PathBuf}, process::{exit, Command}};
 use rofi;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -27,48 +27,77 @@ struct Cli {
     filter: Option<Vec<String>>,
 }
 
-// #[derive(Serialize, Deserialize)]
-// struct Emoji {
-//     file: OsString,
-//     emoji: String,
-// }
+#[derive(Serialize, Deserialize, Debug)]
+struct Emoji {
+    file: OsString,
+    emoji: String,
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Emojies {
-    map: HashMap<OsString, Vec<String>>,
+    // map: IndexMap<OsString, Vec<String>>,
+    list: Vec<Emoji>,
 }
 
 impl Emojies {
 
     fn new() -> Self {
-        Self { map: HashMap::new() }
+        Self { list: Vec::new() }
+    }
+
+    fn load_from_cache() -> Self {
+        emojies()
+    }
+
+    fn store_to_cache(&self) {
+        let home_dir = env::var("HOME").expect("HOME variable seems to not be set");
+        let cache_dir = PathBuf::from(format!("{}/{}", home_dir, CACHE_DIR));
+
+        if !cache_dir.exists() {
+            fs::create_dir_all(&cache_dir).expect("Could not create cache directory");
+            println!("Created directory: {}", cache_dir.display());
+        }
+
+        let cache_file_path = cache_dir.join("cache.bin");
+        let file = File::create(&cache_file_path).expect("Could not create cache file");
+
+        let mut writer = BufWriter::new(file);
+        bincode::serialize_into(&mut writer, &self).unwrap();
     }
 
     /// Returns all emojies from all files.
     fn all(&self) -> Vec<&String> {
-        self.map.values().flatten().collect()
+        self.list.iter().map(|emoji| &emoji.emoji ).collect()
     }
 
 
     /// Returns all emojies that originate from files that contain any word in `keywords` as a substring.
     /// In other words, filter the file names by keywords. Matches, when any keyword matches.
     fn filtered(&self, keywords: Vec<String>) -> Vec<&String> {
-        self.map
+        self.list
             .iter()
-            .filter(|(file, _)| {
-                let matched = keywords.iter().any(|keyword| file.to_str().unwrap_or("").contains(keyword));
-                if matched { println!("Selected file {file:?}"); }
+            .filter(|emoji| {
+                let matched = keywords.iter().any(|keyword| emoji.file.to_str().unwrap_or("").contains(keyword));
+                if matched { println!("Selected file {:?}", emoji.file); }
                 matched
 
             })
-            .flat_map(|(_, emojies)| emojies.iter())
+            .map(|emoji| &emoji.emoji )
             .collect()
     }
 
     fn push(&mut self, file: OsString, emoji: String) {
-        self.map.entry(file) // Get the entry for the key
-            .or_insert_with(Vec::new) // If the key doesn't exist, insert an empty Vec
-            .push(emoji); // Add the value to the Vec
+        // self.list.entry(file) // Get the entry for the key
+        //     .or_insert_with(Vec::new) // If the key doesn't exist, insert an empty Vec
+        //     .push(emoji); // Add the value to the Vec
+        self.list.push(Emoji{emoji, file});
+    }
+
+    fn move_element_to_front(&mut self, emoji: String) {
+        if let Some(index) = self.list.iter().position(|x| x.emoji == emoji) {
+            let item = self.list.remove(index);
+            self.list.insert(0, item);
+        }
     }
 
 }
@@ -84,7 +113,7 @@ fn main() {
         exit(0);
     }
 
-    let data = emojies();
+    let mut data = emojies();
 
     let emojies: Vec<&String> = if let Some(filter_keywords) = args.filter {
         data.filtered(filter_keywords)
@@ -101,29 +130,21 @@ fn main() {
     match rofi_window.run() {
         Ok(choice) => {
 
-            let (choice, _) = choice.split_once(" ").expect("Could not extract emoji from selected line");
+            let (emoji, _) = choice.split_once(" ").expect("Could not extract emoji from selected line");
 
-            println!("Choice: {}", choice);
+            println!("Choice: {}", emoji);
 
-            let mut child = Command::new("xclip")
-                .arg("-selection")
-                .arg("clipboard")
-                .stdin(std::process::Stdio::piped())
-                .spawn()
-                .expect("Failed to spawn xclip process");
+            clipboard(emoji);
 
-            if let Some(stdin) = &mut child.stdin {
-                use std::io::Write;
-                stdin.write_all(choice.as_bytes()).expect("Failed to write to xclip");
-            }
+            data.move_element_to_front(choice);
 
-            child.wait().expect("Failed to wait for xclip process");
+            data.store_to_cache();
+
         }
         Err(rofi::Error::Interrupted) => println!("Interrupted"),
         Err(e) => println!("Error: {}", e)
     }
 }
-
 
 /// Returns a list of emojies.
 ///
@@ -180,7 +201,7 @@ fn emojies() -> Emojies {
 
     let file = File::open(&cache_file_path).expect("Could not read cache file");
     let mut reader = BufReader::new(file);
-    let decoded: Emojies = bincode::deserialize_from(&mut reader).unwrap();
+    let decoded: Emojies = bincode::deserialize_from(&mut reader).expect("Could not deserialize cache. Try deleting ~/.cache/rustimoji/");
 
     // println!("decoded: {:#?}", decoded);
 
