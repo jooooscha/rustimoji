@@ -211,3 +211,20 @@ fn get_emoji_list() -> Vec<OsString> {
 
     list
 }
+
+/// Copy `text` to clipboard
+fn clipboard(text: &str) {
+    let mut child = Command::new("xclip")
+        .arg("-selection")
+        .arg("clipboard")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn xclip process");
+
+    if let Some(stdin) = &mut child.stdin {
+        use std::io::Write;
+        stdin.write_all(text.as_bytes()).expect("Failed to write to xclip");
+    }
+
+    child.wait().expect("Failed to wait for xclip process");
+}
