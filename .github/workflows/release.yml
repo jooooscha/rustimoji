@@ -32,7 +32,7 @@ jobs:
       # Optionally compress the build output
       - name: Compress build output
         run: |
-          tar -czvf rustimoji-linux.tar.gz -C target/release/ rustimoji-linux
+          tar -czvf rustimoji-linux.tar.gz -C target/release/ rustimoji
 
       - name: Release
         uses: softprops/action-gh-release@v2
