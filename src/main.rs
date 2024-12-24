@@ -5,6 +5,7 @@ use std::fs;
 use bincode;
 use std::io::{BufReader, BufWriter};
 use glob::glob;
+use diacritics::remove_diacritics;
 
 use clap::Parser;
 
@@ -78,7 +79,7 @@ impl Emojies {
             .iter()
             .filter(|emoji| {
                 let matched = keywords.iter().any(|keyword| emoji.file.to_str().unwrap_or("").contains(keyword));
-                if matched { println!("Selected file {:?}", emoji.file); }
+                // if matched { println!("Selected file {:?}", emoji.file); }
                 matched
 
             })
@@ -187,6 +188,7 @@ fn emojies() -> Emojies {
 
             for line in reader.lines() {
                 let line = line.expect("Could not read globbed file");
+                let line = remove_diacritics(&line); // remove diacritics: turn ń into n. Because rofi cant to that while matching, we do it here.
                 let file_name: OsString = file_path.file_name().unwrap().to_os_string();
 
                 emoji_map.push(file_name, line);
