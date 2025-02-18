@@ -214,7 +214,7 @@ fn get_emoji_list() -> Vec<OsString> {
 
     // TODO: path
 
-    let path = "/nix/store/2d2sqja29sf9zk2rrnn41hrq0i5zljly-rofimoji-6.3.1/lib/python3.11/site-packages/picker/data/";
+    let path = EMOJI_FILES_DIR;
     let pattern = format!("{path}**/*.csv");
 
     let mut list: Vec<OsString> = Vec::new();
