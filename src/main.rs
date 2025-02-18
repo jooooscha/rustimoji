@@ -9,7 +9,7 @@ use diacritics::remove_diacritics;
 
 use clap::Parser;
 
-const EMOJI_FILES_DIR: &str = "/nix/store/2d2sqja29sf9zk2rrnn41hrq0i5zljly-rofimoji-6.3.1/lib/python3.11/site-packages/picker/data/";
+const EMOJI_FILES_DIR: &str = "./src/picker/data/";
 const CACHE_DIR: &str = ".cache/rustimoji/";
 const ROFI_LINES: usize = 10;
 
