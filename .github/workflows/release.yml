@@ -16,6 +16,9 @@ jobs:
     steps:
       # prepare nix and devenv
       - uses: actions/checkout@v4
+        with:
+          submodules: true
+
       - uses: cachix/install-nix-action@v26
       - uses: cachix/cachix-action@v14
         with:

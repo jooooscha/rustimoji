@@ -1,0 +1,3 @@
+[submodule "rofimoji"]
+	path = rofimoji
+	url = https://github.com/fdw/rofimoji
