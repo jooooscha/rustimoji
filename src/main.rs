@@ -46,10 +46,6 @@ impl Emojies {
         Self { list: Vec::new() }
     }
 
-    fn load_from_cache() -> Self {
-        emojies()
-    }
-
     fn store_to_cache(&self) {
         let home_dir = env::var("HOME").expect("HOME variable seems to not be set");
         let cache_dir = PathBuf::from(format!("{}/{}", home_dir, CACHE_DIR));
@@ -106,13 +102,6 @@ impl Emojies {
 fn main() {
 
     let args = Cli::parse();
-
-    if args.list {
-        println!("List of emoji options");
-        let files = get_emoji_list();
-        println!("{files:#?}");
-        exit(0);
-    }
 
     let mut data = emojies();
 
@@ -208,31 +197,6 @@ fn emojies() -> Emojies {
     // println!("decoded: {:#?}", decoded);
 
     decoded
-}
-
-fn get_emoji_list() -> Vec<OsString> {
-
-    // TODO: path
-
-    let path = EMOJI_FILES_DIR;
-    let pattern = format!("{path}**/*.csv");
-
-    let mut list: Vec<OsString> = Vec::new();
-
-    if let Ok(paths) = glob(&pattern) {
-        for file in paths {
-            let file = file.expect("Cannot read file from path");
-            let file = file.file_name();
-            if let Some(filename) = file {
-                list.push(filename.to_os_string());
-            }
-        }
-    } else {
-        println!("Error {:?}", glob(&pattern));
-        panic!("Did not find any emoji files");
-    };
-
-    list
 }
 
 /// Copy `text` to clipboard
