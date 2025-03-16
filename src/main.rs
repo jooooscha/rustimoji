@@ -32,6 +32,9 @@ struct Cli {
 
     #[arg(long)]
     recreate: bool,
+
+    #[arg(long)]
+    clean: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -90,6 +93,44 @@ impl Emojies {
         }
 
         emojies
+    }
+
+    fn clean(&mut self) {
+        let home_dir = env::var("HOME").expect("HOME variable seems to not be set");
+        let emoji_dir = PathBuf::from(format!("{}/{}", home_dir, EMOJI_FILES_DIR));
+        println!("emoji_dir: {:?}", emoji_dir);
+
+        if !emoji_dir.exists() {
+            write_example_file();
+        };
+
+        let mut found_emojies = Vec::new();
+
+        for file_path in glob(emoji_dir.join("**/*.csv").to_str().unwrap()).expect("Failed to read glob pattern") {
+
+            let file_path = file_path.expect("Could not read file matches by glob");
+
+            let path = file_path.as_path();
+            if !path.is_file() {
+                continue
+            }
+
+            let file = File::open(&path).expect("Could not open globbed file");
+
+            let reader = io::BufReader::new(file);
+
+            for line in reader.lines() {
+                let line = line.expect("Could not read globbed file");
+                let emoji_line = remove_diacritics(&line); // remove diacritics: turn ń into n. Because rofi cant to that while matching, we do it here.
+
+                let emoji_line = emoji_line.trim().to_string();
+                found_emojies.push(emoji_line)
+            }
+        }
+
+        // only keep when in found emojies
+        self.items.retain(|e| found_emojies.contains(&e.emoji_line));
+        self.store_to_cache()
     }
 
     fn store_to_cache(&self) {
@@ -201,6 +242,7 @@ fn main() {
 
     let args = Cli::parse();
 
+
     let mut emojies = if args.recreate {
         let mut e = Emojies::empty();
         e.scan();
@@ -208,6 +250,10 @@ fn main() {
     } else {
         Emojies::load()
     };
+
+    if args.clean {
+        emojies.clean()
+    }
 
     if args.rescan {
         println!("Extra file scan requested");
