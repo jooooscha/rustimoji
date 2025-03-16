@@ -1,4 +1,4 @@
-use std::{env, ffi::OsString, fs::{File, OpenOptions}, io::{self, BufRead, Write}, path::{Path, PathBuf}, process::{exit, Command}};
+use std::{collections::HashMap, env, ffi::OsString, fs::{File, OpenOptions}, io::{self, BufRead, Write}, path::{Path, PathBuf}, process::{exit, Command}};
 use rofi;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -47,12 +47,13 @@ struct Emoji {
 struct Emojies {
     // map: IndexMap<OsString, Vec<String>>,
     items: Vec<Emoji>,
+    paths: HashMap<String, String>,
 }
 
 impl Emojies {
 
     fn empty() -> Self {
-        Self { items: Vec::new() }
+        Self { items: Vec::new(), paths: HashMap::new() }
     }
 
     /// Returns a list of emojies.
@@ -177,10 +178,19 @@ impl Emojies {
 
             for line in reader.lines() {
                 let line = line.expect("Could not read globbed file");
-                let emoji_line = remove_diacritics(&line); // remove diacritics: turn ń into n. Because rofi cant to that while matching, we do it here.
+                let mut emoji_line = remove_diacritics(&line); // remove diacritics: turn ń into n. Because rofi cant to that while matching, we do it here.
                 let file_name: OsString = file_path.file_name().unwrap().to_os_string();
 
-                let emoji_line = emoji_line.trim().to_string();
+
+                let (emoji, rest) = emoji_line.split_once(" ").expect("Could not extract emoji from selected line");
+
+                if emoji == "IMG" {
+                    let (path, tag) = rest.split_once(" ").expect(&format!("Could not extract tag and path from IMG: {}", rest));
+                    self.paths.insert(tag.to_string(), path.to_string());
+                    emoji_line = format!("{} {}", emoji, tag);
+                }
+
+                emoji_line = emoji_line.trim().to_string();
 
                 if !self.contains(&emoji_line) {
                     println!("Adding new emoji: \n - {}\n - {:?}", emoji_line, file_name);
@@ -211,6 +221,10 @@ impl Emojies {
             })
             .map(|emoji| &emoji.emoji_line )
             .collect()
+    }
+
+    fn get_path(&self, tag: &str) -> Option<&String> {
+        self.paths.get(tag)
     }
 
     fn push(&mut self, origin_file: OsString, emoji_line: String) {
@@ -277,16 +291,19 @@ fn main() {
     match rofi_window.run() {
         Ok(choice) => {
 
-            let (emoji, _) = choice.split_once(" ").expect("Could not extract emoji from selected line");
+            let (emoji, tag) = choice.split_once(" ").expect("Could not extract emoji from selected line");
 
-            println!("Choice: {}", emoji);
-
-            clipboard(emoji);
-
+            if emoji == "IMG" {
+                println!("Choice: {}", tag);
+                let path = emojies.get_path(tag).expect("Could not find path");
+                clipboard_img(path);
+            } else {
+                println!("Choice: {}", emoji);
+                clipboard(emoji);
+            };
             emojies.move_element_to_front(choice);
 
             emojies.store_to_cache();
-
         }
         Err(rofi::Error::Interrupted) => println!("Interrupted"),
         Err(e) => println!("Error: {}", e)
@@ -334,6 +351,23 @@ fn clipboard(text: &str) {
         use std::io::Write;
         stdin.write_all(text.as_bytes()).expect("Failed to write to xclip");
     }
+
+    child.wait().expect("Failed to wait for xclip process");
+}
+
+fn clipboard_img(path: &str) {
+    let home_dir = env::var("HOME").expect("HOME variable seems to not be set");
+    let emoji_dir = PathBuf::from(format!("{}/{}", home_dir, EMOJI_FILES_DIR));
+    let mut child = Command::new("xclip")
+        .arg("-selection")
+        .arg("clipboard")
+        .arg("-t")
+        .arg("image/png")
+        .arg("-i")
+        .arg(emoji_dir.join(path))
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn xclip process");
 
     child.wait().expect("Failed to wait for xclip process");
 }
