@@ -1,4 +1,4 @@
-use std::{env, ffi::OsString, fs::File, io::{self, BufRead}, path::{Path, PathBuf}, process::{exit, Command}};
+use std::{env, ffi::OsString, fs::{File, OpenOptions}, io::{self, BufRead, Write}, path::{Path, PathBuf}, process::{exit, Command}};
 use rofi;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -9,7 +9,7 @@ use diacritics::remove_diacritics;
 
 use clap::Parser;
 
-const EMOJI_FILES_DIR: &str = "./src/picker/data/";
+const EMOJI_FILES_DIR: &str = ".config/rustimoji/";
 const CACHE_DIR: &str = ".cache/rustimoji/";
 const ROFI_LINES: usize = 10;
 
@@ -29,6 +29,9 @@ struct Cli {
 
     #[arg(long)]
     rescan: bool,
+
+    #[arg(long)]
+    recreate: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -44,6 +47,10 @@ struct Emojies {
 }
 
 impl Emojies {
+
+    fn empty() -> Self {
+        Self { items: Vec::new() }
+    }
 
     /// Returns a list of emojies.
     ///
@@ -61,9 +68,21 @@ impl Emojies {
             println!("Created directory: {}", cache_dir.display());
         }
 
-        let file = File::open(&cache_file_path).expect("Could not read cache file");
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&cache_file_path)
+            .expect("Could not create or read cache file");
         let mut reader = BufReader::new(file);
-        let mut emojies: Emojies = bincode::deserialize_from(&mut reader).expect("Could not deserialize cache. Try deleting ~/.cache/rustimoji/");
+
+        let mut emojies = match bincode::deserialize_from(&mut reader) {
+            Ok(emojies) => emojies,
+            Err(err) => {
+                println!("Could not read cache. Returning empty: {}", err);
+                Emojies::empty()
+            }
+        };
 
         if emojies.items.is_empty() {
             println!("Cache is empty");
@@ -78,6 +97,11 @@ impl Emojies {
         let cache_dir = PathBuf::from(format!("{}/{}", home_dir, CACHE_DIR));
         let cache_file_path = cache_dir.join("cache.bin");
 
+        if !cache_dir.exists() {
+            fs::create_dir_all(&cache_dir).expect("Could not create cache directory");
+            println!("Created directory: {}", cache_dir.display());
+        }
+
         let file = File::create(&cache_file_path).expect("Could not create cache file");
 
         let mut writer = BufWriter::new(file);
@@ -89,9 +113,15 @@ impl Emojies {
         println!("Scanning files");
         // read emoji csv files
 
-        let path = Path::new(EMOJI_FILES_DIR);
+        let home_dir = env::var("HOME").expect("HOME variable seems to not be set");
+        let emoji_dir = PathBuf::from(format!("{}/{}", home_dir, EMOJI_FILES_DIR));
+        println!("emoji_dir: {:?}", emoji_dir);
 
-        for file_path in glob(path.join("**/*.csv").to_str().unwrap()).expect("Failed to read glob pattern") {
+        if !emoji_dir.exists() {
+            write_example_file();
+        };
+
+        for file_path in glob(emoji_dir.join("**/*.csv").to_str().unwrap()).expect("Failed to read glob pattern") {
 
             let file_path = file_path.expect("Could not read file matches by glob");
 
@@ -109,7 +139,10 @@ impl Emojies {
                 let emoji_line = remove_diacritics(&line); // remove diacritics: turn ń into n. Because rofi cant to that while matching, we do it here.
                 let file_name: OsString = file_path.file_name().unwrap().to_os_string();
 
+                let emoji_line = emoji_line.trim().to_string();
+
                 if !self.contains(&emoji_line) {
+                    println!("Adding new emoji: \n - {}\n - {:?}", emoji_line, file_name);
                     self.push(file_name, emoji_line)
                 }
             }
@@ -140,7 +173,9 @@ impl Emojies {
     }
 
     fn push(&mut self, origin_file: OsString, emoji_line: String) {
-        self.items.push(Emoji{emoji_line, origin_file});
+        if !emoji_line.is_empty() {
+            self.items.push(Emoji{emoji_line, origin_file});
+        }
     }
 
     fn contains(&self, emoji: &String) -> bool {
@@ -166,7 +201,13 @@ fn main() {
 
     let args = Cli::parse();
 
-    let mut emojies = Emojies::load();
+    let mut emojies = if args.recreate {
+        let mut e = Emojies::empty();
+        e.scan();
+        e
+    } else {
+        Emojies::load()
+    };
 
     if args.rescan {
         println!("Extra file scan requested");
@@ -204,6 +245,34 @@ fn main() {
         Err(rofi::Error::Interrupted) => println!("Interrupted"),
         Err(e) => println!("Error: {}", e)
     }
+}
+
+/// Write an example .csv to config dir
+fn write_example_file() {
+    let home_dir = env::var("HOME").expect("HOME variable seems to not be set");
+    let emoji_dir = PathBuf::from(format!("{}/{}", home_dir, EMOJI_FILES_DIR));
+    println!("emoji_dir: {:?}", emoji_dir);
+
+    if !emoji_dir.exists() {
+        fs::create_dir_all(&emoji_dir).expect("Could not create cache directory");
+    };
+
+    let example_string = "
+👋 waving hand <small>(hand, wave, waving)</small>
+🤚 raised back of hand <small>(backhand, raised, raised back of hand)</small>
+🖐️ hand with fingers splayed <small>(finger, hand, hand with fingers splayed, splayed)</small>
+✋ raised hand <small>(hand, raised hand)</small>
+🖖 vulcan salute <small>(finger, hand, spock, vulcan, vulcan salute)</small>
+🫱 rightwards hand
+🫲 leftwards hand
+🫳 palm down hand
+🫴 palm up hand
+🫷 leftwards pushing hand
+".trim();
+
+    let example_path = emoji_dir.join("example.csv");
+    let mut file = File::create(example_path).expect("Could not create cache file");
+    file.write(example_string.as_bytes()).expect("Could not write example file");
 }
 
 /// Copy `text` to clipboard
