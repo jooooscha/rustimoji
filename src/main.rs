@@ -122,7 +122,17 @@ impl Emojies {
 
             for line in reader.lines() {
                 let line = line.expect("Could not read globbed file");
-                let emoji_line = remove_diacritics(&line); // remove diacritics: turn ń into n. Because rofi cant to that while matching, we do it here.
+                let mut emoji_line = remove_diacritics(&line); // remove diacritics: turn ń into n. Because rofi cant to that while matching, we do it here.
+
+                let (emoji, rest) = emoji_line.split_once(" ").expect("Could not extract emoji from selected line");
+
+                if emoji == "IMG" {
+                    let (path, tag) = rest.split_once(" ").expect(&format!("Could not extract tag and path from IMG: {}", rest));
+                    self.paths.insert(tag.to_string(), path.to_string());
+                    emoji_line = format!("{} {}", emoji, tag);
+                }
+
+                emoji_line = emoji_line.trim().to_string();
 
                 let emoji_line = emoji_line.trim().to_string();
                 found_emojies.push(emoji_line)
