@@ -28,87 +28,68 @@ struct Cli {
     filter: Option<Vec<String>>,
 
     #[arg(long)]
-    reload_cache: bool,
+    rescan: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Emoji {
-    file: OsString,
-    emoji: String,
+    origin_file: OsString,
+    emoji_line: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Emojies {
     // map: IndexMap<OsString, Vec<String>>,
-    list: Vec<Emoji>,
+    items: Vec<Emoji>,
 }
 
 impl Emojies {
-
-    fn new() -> Self {
-        Self { list: Vec::new() }
-    }
 
     /// Returns a list of emojies.
     ///
     /// - If the cache is already built, returns the content of the cache
     /// - Otherwse, fill cache and return emojies afterwards
-    fn from_cache() -> Self {
+    fn load() -> Self {
+        println!("Loading from cache");
+
         let home_dir = env::var("HOME").expect("HOME variable seems to not be set");
         let cache_dir = PathBuf::from(format!("{}/{}", home_dir, CACHE_DIR));
         let cache_file_path = cache_dir.join("cache.bin");
-
-        // no cache exists, create one
-        if !cache_file_path.exists() {
-            Self::fill_cache()
-        }
-
-        println!("Reading cache");
-
-        let file = File::open(&cache_file_path).expect("Could not read cache file");
-        let mut reader = BufReader::new(file);
-        let decoded: Emojies = bincode::deserialize_from(&mut reader).expect("Could not deserialize cache. Try deleting ~/.cache/rustimoji/");
-
-        // println!("decoded: {:#?}", decoded);
-
-        decoded
-    }
-
-    fn store_to_cache(&self) {
-        let home_dir = env::var("HOME").expect("HOME variable seems to not be set");
-        let cache_dir = PathBuf::from(format!("{}/{}", home_dir, CACHE_DIR));
 
         if !cache_dir.exists() {
             fs::create_dir_all(&cache_dir).expect("Could not create cache directory");
             println!("Created directory: {}", cache_dir.display());
         }
 
+        let file = File::open(&cache_file_path).expect("Could not read cache file");
+        let mut reader = BufReader::new(file);
+        let mut emojies: Emojies = bincode::deserialize_from(&mut reader).expect("Could not deserialize cache. Try deleting ~/.cache/rustimoji/");
+
+        if emojies.items.is_empty() {
+            println!("Cache is empty");
+            emojies.scan()
+        }
+
+        emojies
+    }
+
+    fn store_to_cache(&self) {
+        let home_dir = env::var("HOME").expect("HOME variable seems to not be set");
+        let cache_dir = PathBuf::from(format!("{}/{}", home_dir, CACHE_DIR));
         let cache_file_path = cache_dir.join("cache.bin");
+
         let file = File::create(&cache_file_path).expect("Could not create cache file");
 
         let mut writer = BufWriter::new(file);
         bincode::serialize_into(&mut writer, &self).unwrap();
     }
 
-    fn fill_cache() {
-
-        let home_dir = env::var("HOME").expect("HOME variable seems to not be set");
-        let cache_dir = PathBuf::from(format!("{}/{}", home_dir, CACHE_DIR));
-        let cache_file_path = cache_dir.join("cache.bin");
-
-        if !cache_dir.exists() {
-            fs::create_dir_all(&cache_dir).expect("Could not create cache directory");
-            println!("Created directory: {}", cache_dir.display());
-        }
-
-        println!("Creating cache");
-        let file = File::create(&cache_file_path).expect("Could not create cache file");
-
+    /// Scan emoji directory and merge new items with already existing ones
+    fn scan(&mut self) {
+        println!("Scanning files");
         // read emoji csv files
 
         let path = Path::new(EMOJI_FILES_DIR);
-
-        let mut emoji_map = Emojies::new();
 
         for file_path in glob(path.join("**/*.csv").to_str().unwrap()).expect("Failed to read glob pattern") {
 
@@ -125,49 +106,57 @@ impl Emojies {
 
             for line in reader.lines() {
                 let line = line.expect("Could not read globbed file");
-                let line = remove_diacritics(&line); // remove diacritics: turn ń into n. Because rofi cant to that while matching, we do it here.
+                let emoji_line = remove_diacritics(&line); // remove diacritics: turn ń into n. Because rofi cant to that while matching, we do it here.
                 let file_name: OsString = file_path.file_name().unwrap().to_os_string();
 
-                emoji_map.push(file_name, line);
+                if !self.contains(&emoji_line) {
+                    self.push(file_name, emoji_line)
+                }
             }
         }
 
-        let mut writer = BufWriter::new(file);
-        bincode::serialize_into(&mut writer, &emoji_map).unwrap();
+        self.store_to_cache()
     }
 
     /// Returns all emojies from all files.
     fn all(&self) -> Vec<&String> {
-        self.list.iter().map(|emoji| &emoji.emoji ).collect()
+        self.items.iter().map(|emoji| &emoji.emoji_line ).collect()
     }
 
 
     /// Returns all emojies that originate from files that contain any word in `keywords` as a substring.
     /// In other words, filter the file names by keywords. Matches, when any keyword matches.
     fn filtered(&self, keywords: Vec<String>) -> Vec<&String> {
-        self.list
+        self.items
             .iter()
             .filter(|emoji| {
-                let matched = keywords.iter().any(|keyword| emoji.file.to_str().unwrap_or("").contains(keyword));
+                let matched = keywords.iter().any(|keyword| emoji.origin_file.to_str().unwrap_or("").contains(keyword));
                 // if matched { println!("Selected file {:?}", emoji.file); }
                 matched
 
             })
-            .map(|emoji| &emoji.emoji )
+            .map(|emoji| &emoji.emoji_line )
             .collect()
     }
 
-    fn push(&mut self, file: OsString, emoji: String) {
-        // self.list.entry(file) // Get the entry for the key
-        //     .or_insert_with(Vec::new) // If the key doesn't exist, insert an empty Vec
-        //     .push(emoji); // Add the value to the Vec
-        self.list.push(Emoji{emoji, file});
+    fn push(&mut self, origin_file: OsString, emoji_line: String) {
+        self.items.push(Emoji{emoji_line, origin_file});
     }
 
-    fn move_element_to_front(&mut self, emoji: String) {
-        if let Some(index) = self.list.iter().position(|x| x.emoji == emoji) {
-            let item = self.list.remove(index);
-            self.list.insert(0, item);
+    fn contains(&self, emoji: &String) -> bool {
+        for item in self.items.iter() {
+            if &item.emoji_line == emoji {
+                return true
+            }
+        }
+
+        false
+    }
+
+    fn move_element_to_front(&mut self, emoji_line: String) {
+        if let Some(index) = self.items.iter().position(|x| x.emoji_line == emoji_line) {
+            let item = self.items.remove(index);
+            self.items.insert(0, item);
         }
     }
 
@@ -177,19 +166,22 @@ fn main() {
 
     let args = Cli::parse();
 
-    if args.reload_cache {
-        Emojies::fill_cache()
+    let mut emojies = Emojies::load();
+
+    if args.rescan {
+        println!("Extra file scan requested");
+        emojies.scan()
     }
 
-    let mut data = Emojies::from_cache();
-
-    let emojies: Vec<&String> = if let Some(filter_keywords) = args.filter {
-        data.filtered(filter_keywords)
+    let filtered_emojies: Vec<&String> = if let Some(filter_keywords) = args.filter {
+        println!("Applying filter");
+        emojies.filtered(filter_keywords)
     } else {
-        data.all()
+        emojies.all()
     };
 
-    let mut rofi_window = rofi::Rofi::new(&emojies);
+    println!("Showing rofi");
+    let mut rofi_window = rofi::Rofi::new(&filtered_emojies);
     rofi_window.pango();
     rofi_window.prompt("😀");
     rofi_window.lines(ROFI_LINES);
@@ -204,9 +196,9 @@ fn main() {
 
             clipboard(emoji);
 
-            data.move_element_to_front(choice);
+            emojies.move_element_to_front(choice);
 
-            data.store_to_cache();
+            emojies.store_to_cache();
 
         }
         Err(rofi::Error::Interrupted) => println!("Interrupted"),
