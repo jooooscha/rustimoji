@@ -26,6 +26,9 @@ struct Cli {
 
     #[arg(long)]
     filter: Option<Vec<String>>,
+
+    #[arg(long)]
+    reload_cache: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -46,6 +49,31 @@ impl Emojies {
         Self { list: Vec::new() }
     }
 
+    /// Returns a list of emojies.
+    ///
+    /// - If the cache is already built, returns the content of the cache
+    /// - Otherwse, fill cache and return emojies afterwards
+    fn from_cache() -> Self {
+        let home_dir = env::var("HOME").expect("HOME variable seems to not be set");
+        let cache_dir = PathBuf::from(format!("{}/{}", home_dir, CACHE_DIR));
+        let cache_file_path = cache_dir.join("cache.bin");
+
+        // no cache exists, create one
+        if !cache_file_path.exists() {
+            Self::fill_cache()
+        }
+
+        println!("Reading cache");
+
+        let file = File::open(&cache_file_path).expect("Could not read cache file");
+        let mut reader = BufReader::new(file);
+        let decoded: Emojies = bincode::deserialize_from(&mut reader).expect("Could not deserialize cache. Try deleting ~/.cache/rustimoji/");
+
+        // println!("decoded: {:#?}", decoded);
+
+        decoded
+    }
+
     fn store_to_cache(&self) {
         let home_dir = env::var("HOME").expect("HOME variable seems to not be set");
         let cache_dir = PathBuf::from(format!("{}/{}", home_dir, CACHE_DIR));
@@ -60,6 +88,52 @@ impl Emojies {
 
         let mut writer = BufWriter::new(file);
         bincode::serialize_into(&mut writer, &self).unwrap();
+    }
+
+    fn fill_cache() {
+
+        let home_dir = env::var("HOME").expect("HOME variable seems to not be set");
+        let cache_dir = PathBuf::from(format!("{}/{}", home_dir, CACHE_DIR));
+        let cache_file_path = cache_dir.join("cache.bin");
+
+        if !cache_dir.exists() {
+            fs::create_dir_all(&cache_dir).expect("Could not create cache directory");
+            println!("Created directory: {}", cache_dir.display());
+        }
+
+        println!("Creating cache");
+        let file = File::create(&cache_file_path).expect("Could not create cache file");
+
+        // read emoji csv files
+
+        let path = Path::new(EMOJI_FILES_DIR);
+
+        let mut emoji_map = Emojies::new();
+
+        for file_path in glob(path.join("**/*.csv").to_str().unwrap()).expect("Failed to read glob pattern") {
+
+            let file_path = file_path.expect("Could not read file matches by glob");
+
+            let path = file_path.as_path();
+            if !path.is_file() {
+                continue
+            }
+
+            let file = File::open(&path).expect("Could not open globbed file");
+
+            let reader = io::BufReader::new(file);
+
+            for line in reader.lines() {
+                let line = line.expect("Could not read globbed file");
+                let line = remove_diacritics(&line); // remove diacritics: turn ń into n. Because rofi cant to that while matching, we do it here.
+                let file_name: OsString = file_path.file_name().unwrap().to_os_string();
+
+                emoji_map.push(file_name, line);
+            }
+        }
+
+        let mut writer = BufWriter::new(file);
+        bincode::serialize_into(&mut writer, &emoji_map).unwrap();
     }
 
     /// Returns all emojies from all files.
@@ -103,7 +177,11 @@ fn main() {
 
     let args = Cli::parse();
 
-    let mut data = emojies();
+    if args.reload_cache {
+        Emojies::fill_cache()
+    }
+
+    let mut data = Emojies::from_cache();
 
     let emojies: Vec<&String> = if let Some(filter_keywords) = args.filter {
         data.filtered(filter_keywords)
@@ -134,69 +212,6 @@ fn main() {
         Err(rofi::Error::Interrupted) => println!("Interrupted"),
         Err(e) => println!("Error: {}", e)
     }
-}
-
-/// Returns a list of emojies.
-///
-/// - If the cache is already built, returns the content of the cache
-/// - Otherwse, fill cache and return emojies afterwards
-fn emojies() -> Emojies {
-    let home_dir = env::var("HOME").expect("HOME variable seems to not be set");
-    let cache_dir = PathBuf::from(format!("{}/{}", home_dir, CACHE_DIR));
-
-    if !cache_dir.exists() {
-        fs::create_dir_all(&cache_dir).expect("Could not create cache directory");
-        println!("Created directory: {}", cache_dir.display());
-    }
-
-    let cache_file_path = cache_dir.join("cache.bin");
-
-    // no cache exists, create one
-    if !cache_file_path.exists() {
-        println!("Creating cache");
-        let file = File::create(&cache_file_path).expect("Could not create cache file");
-
-        // read emoji csv files
-
-        let path = Path::new(EMOJI_FILES_DIR);
-
-        let mut emoji_map = Emojies::new();
-
-        for file_path in glob(path.join("**/*.csv").to_str().unwrap()).expect("Failed to read glob pattern") {
-
-            let file_path = file_path.expect("Could not read file matches by glob");
-
-            let path = file_path.as_path();
-            if !path.is_file() {
-                continue
-            }
-
-            let file = File::open(&path).expect("Could not open globbed file");
-
-            let reader = io::BufReader::new(file);
-
-            for line in reader.lines() {
-                let line = line.expect("Could not read globbed file");
-                let line = remove_diacritics(&line); // remove diacritics: turn ń into n. Because rofi cant to that while matching, we do it here.
-                let file_name: OsString = file_path.file_name().unwrap().to_os_string();
-
-                emoji_map.push(file_name, line);
-            }
-        }
-
-        let mut writer = BufWriter::new(file);
-        bincode::serialize_into(&mut writer, &emoji_map).unwrap();
-    }
-
-    println!("Reading cache");
-
-    let file = File::open(&cache_file_path).expect("Could not read cache file");
-    let mut reader = BufReader::new(file);
-    let decoded: Emojies = bincode::deserialize_from(&mut reader).expect("Could not deserialize cache. Try deleting ~/.cache/rustimoji/");
-
-    // println!("decoded: {:#?}", decoded);
-
-    decoded
 }
 
 /// Copy `text` to clipboard
