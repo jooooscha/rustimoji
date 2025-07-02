@@ -1,11 +1,12 @@
-use std::{collections::HashMap, env, ffi::OsString, fs::{File, OpenOptions}, io::{self, BufRead, Write}, path::{Path, PathBuf}, process::{exit, Command}};
-use rofi;
+use std::{collections::HashMap, env, ffi::OsString, fs::{File, OpenOptions}, io::{self, BufRead, Write}, path::PathBuf, process::Command};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use bincode;
 use std::io::{BufReader, BufWriter};
 use glob::glob;
 use diacritics::remove_diacritics;
+use image::open;
+use std::io::Cursor;
 
 use clap::Parser;
 
@@ -292,12 +293,13 @@ fn main() {
     };
 
     println!("Showing rofi");
+
     let mut rofi_window = rofi::Rofi::new(&filtered_emojies);
     rofi_window.pango();
     rofi_window.prompt("😀");
     rofi_window.lines(ROFI_LINES);
 
-    // println!("Starting window");
+    println!("Starting window");
     match rofi_window.run() {
         Ok(choice) => {
 
@@ -350,9 +352,7 @@ fn write_example_file() {
 
 /// Copy `text` to clipboard
 fn clipboard(text: &str) {
-    let mut child = Command::new("xclip")
-        .arg("-selection")
-        .arg("clipboard")
+    let mut child = Command::new("wl-copy")
         .stdin(std::process::Stdio::piped())
         .spawn()
         .expect("Failed to spawn xclip process");
@@ -368,16 +368,22 @@ fn clipboard(text: &str) {
 fn clipboard_img(path: &str) {
     let home_dir = env::var("HOME").expect("HOME variable seems to not be set");
     let emoji_dir = PathBuf::from(format!("{}/{}", home_dir, EMOJI_FILES_DIR));
-    let mut child = Command::new("xclip")
-        .arg("-selection")
-        .arg("clipboard")
-        .arg("-t")
+    let img = open(emoji_dir.join(path)).unwrap();
+
+    let mut bytes: Vec<u8> = Vec::new();
+    img.write_to(&mut Cursor::new(&mut bytes),  image::ImageFormat::Png).unwrap();
+
+    let mut child = Command::new("wl-copy")
+        .arg("--type")
         .arg("image/png")
-        .arg("-i")
-        .arg(emoji_dir.join(path))
         .stdin(std::process::Stdio::piped())
         .spawn()
         .expect("Failed to spawn xclip process");
+
+    if let Some(stdin) = &mut child.stdin {
+        use std::io::Write;
+        stdin.write_all(&bytes).expect("Failed to write to xclip");
+    }
 
     child.wait().expect("Failed to wait for xclip process");
 }
